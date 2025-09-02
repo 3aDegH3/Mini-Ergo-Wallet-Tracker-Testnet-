@@ -83,34 +83,64 @@ function setCached(key, data) {
 }
 
 // --- helper: fetch with timeout and browser-like headers ---
-const defaultTimeout = 30_000; // ms (increased)
+// default timeout
+const defaultTimeout = 30_000; // ms
+
 async function fetchWithTimeout(url, opts = {}, timeoutMs = defaultTimeout) {
-  const controller = typeof globalThis.AbortController !== 'undefined'
-    ? new globalThis.AbortController()
-    : null;
-
-  if (controller) {
-    opts.signal = controller.signal;
-    var timeout = setTimeout(() => controller.abort(), timeoutMs);
-  }
-
-  // ensure sensible headers so Explorer accepts server requests
   opts.headers = Object.assign({
     'User-Agent': 'Mini-Ergo-Wallet-Tracker/1.0 (Node.js)',
     'Accept': 'application/json, text/plain, */*',
     'Referer': 'https://api-testnet.ergoplatform.com/'
   }, opts.headers || {});
 
+  // If AbortController is available, use it (preferred).
+  const hasAbort = typeof globalThis.AbortController !== 'undefined';
+
+  if (hasAbort) {
+    const controller = new globalThis.AbortController();
+    opts.signal = controller.signal;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      // Minimal logging to avoid noisy output
+      const res = await fetch(url, opts);
+      clearTimeout(timeout);
+      return res;
+    } catch (err) {
+      clearTimeout(timeout);
+      // Normalize aborted error name
+      if (err && err.name === 'AbortError') {
+        const e = new Error('Request timed out');
+        e.name = 'AbortError';
+        throw e;
+      }
+      throw err;
+    }
+  } else {
+    // Fallback for older Node.js where AbortController is missing:
+    // race fetch against a timeout promise.
+    return await Promise.race([
+      fetch(url, opts),
+      new Promise((_, reject) => setTimeout(() => {
+        const e = new Error('Request timed out');
+        e.name = 'AbortError';
+        reject(e);
+      }, timeoutMs))
+    ]);
+  }
+}
+
+// helper to try parse json safely (returns object or text)
+async function parseResponseBody(resp) {
+  const ct = resp.headers && resp.headers.get ? resp.headers.get('content-type') || '' : '';
+  if (ct.includes('application/json')) {
+    return await resp.json();
+  }
+  // try json parse fallback
+  const txt = await resp.text().catch(() => '');
   try {
-    console.log('[proxy] fetching ->', url);
-    const res = await fetch(url, opts);
-    if (controller) clearTimeout(timeout);
-    console.log('[proxy] response', url, res.status);
-    return res;
-  } catch (err) {
-    if (controller) clearTimeout(timeout);
-    console.error('[proxy] fetchWithTimeout error for', url, err && (err.stack || err.message || err));
-    throw err;
+    return JSON.parse(txt);
+  } catch {
+    return txt;
   }
 }
 
@@ -138,31 +168,46 @@ app.get('/api/wallet/:address/utxos', async (req, res) => {
 
     const url = `${TESTNET_BASE}/boxes/byAddress/${encodeURIComponent(address)}?limit=${limit}&offset=${offset}`;
 
-    // try cache
+    // try cache first
     const cached = getCached(url);
     if (cached) {
-      return res.json({ fetchedAt: Date.now(), cached: true, from: url, items: cached.items || [] });
+      return res.json({ fetchedAt: Date.now(), cached: true, from: url, items: cached.items || cached });
     }
 
     // call explorer
-    const response = await fetchWithTimeout(url);
+    let response;
+    try {
+      response = await fetchWithTimeout(url);
+    } catch (err) {
+      console.error('[proxy] fetch error for', url, err && (err.name || err.message || err));
+      // fallback to cache if available
+      if (cached) {
+        return res.json({ fetchedAt: Date.now(), cached: true, from: url, items: cached.items || cached, note: 'returned stale cached data due to fetch error' });
+      }
+      if (err && err.name === 'AbortError') return res.status(504).json({ error: 'Explorer request timed out' });
+      return res.status(502).json({ error: 'خطا در تماس با Explorer', detail: String(err && (err.message || err)) });
+    }
+
     if (!response.ok) {
       const txt = await response.text().catch(() => '');
       console.error('Explorer returned non-OK:', response.status, txt.slice(0, 1000));
-      // if explorer returned client error (4xx), forward that status; if server error, surface as 502
+      // try to return cached data if explorer failed
+      if (cached) {
+        return res.json({ fetchedAt: Date.now(), cached: true, from: url, items: cached.items || cached, note: 'returned stale cached data due to explorer error' });
+      }
       const statusToClient = response.status >= 500 ? 502 : response.status;
       return res.status(statusToClient).json({ error: 'خطا از Explorer', status: response.status, body: txt.slice(0, 1000) });
     }
 
-    const json = await response.json();
-    // normalize: ensure .items present
-    const items = Array.isArray(json) ? json : (json.items || json);
-    setCached(url, { items, raw: json });
+    // parse body safely
+    const body = await parseResponseBody(response);
+    const items = Array.isArray(body) ? body : (body && body.items ? body.items : []);
+    setCached(url, { items, raw: body });
     return res.json({ fetchedAt: Date.now(), cached: false, from: url, items });
   } catch (err) {
-    console.error('Error /api/wallet/:address/utxos', err && (err.stack || err));
-    if (err.name === 'AbortError') return res.status(504).json({ error: 'Explorer request timed out' });
-    return res.status(500).json({ error: 'خطا در دریافت UTXOها', detail: String(err.message || err) });
+    console.error('Error /api/wallet/:address/utxos', err && (err.stack || err.message || err));
+    if (err && err.name === 'AbortError') return res.status(504).json({ error: 'Explorer request timed out' });
+    return res.status(500).json({ error: 'خطا در دریافت UTXOها', detail: String(err && (err.message || err)) });
   }
 });
 
@@ -176,18 +221,27 @@ app.get('/api/asset/:tokenId', async (req, res) => {
     const cached = getCached(url);
     if (cached) return res.json({ fetchedAt: Date.now(), cached: true, from: url, item: cached });
 
-    const resp = await fetchWithTimeout(url);
+    let resp;
+    try {
+      resp = await fetchWithTimeout(url);
+    } catch (err) {
+      console.error('[proxy] fetch error for token', id, err && (err.name || err.message || err));
+      if (cached) return res.json({ fetchedAt: Date.now(), cached: true, from: url, item: cached, note: 'stale due to fetch error' });
+      if (err && err.name === 'AbortError') return res.status(504).json({ error: 'Explorer request timed out' });
+      return res.status(502).json({ error: 'خطا در تماس با Explorer', detail: String(err && (err.message || err)) });
+    }
+
     if (!resp.ok) {
       const t = await resp.text().catch(()=>'');
       const statusToClient = resp.status >= 500 ? 502 : resp.status;
       return res.status(statusToClient).json({ error: 'Explorer token API error', status: resp.status, body: t.slice(0,1000) });
     }
-    const json = await resp.json();
+    const json = await parseResponseBody(resp);
     setCached(url, json);
     return res.json({ fetchedAt: Date.now(), cached: false, from: url, item: json });
   } catch (err) {
-    console.error('Error /api/asset/:tokenId', err && (err.stack || err));
-    return res.status(500).json({ error: 'خطا در گرفتن اطلاعات توکن', detail: String(err.message || err) });
+    console.error('Error /api/asset/:tokenId', err && (err.stack || err.message || err));
+    return res.status(500).json({ error: 'خطا در گرفتن اطلاعات توکن', detail: String(err && (err.message || err)) });
   }
 });
 
@@ -201,18 +255,27 @@ app.get('/api/tx/:txId', async (req, res) => {
     const cached = getCached(url);
     if (cached) return res.json({ fetchedAt: Date.now(), cached: true, from: url, item: cached });
 
-    const resp = await fetchWithTimeout(url);
+    let resp;
+    try {
+      resp = await fetchWithTimeout(url);
+    } catch (err) {
+      console.error('[proxy] fetch error for tx', txId, err && (err.name || err.message || err));
+      if (cached) return res.json({ fetchedAt: Date.now(), cached: true, from: url, item: cached, note: 'stale due to fetch error' });
+      if (err && err.name === 'AbortError') return res.status(504).json({ error: 'Explorer request timed out' });
+      return res.status(502).json({ error: 'خطا در تماس با Explorer', detail: String(err && (err.message || err)) });
+    }
+
     if (!resp.ok) {
       const t = await resp.text().catch(()=>'');
       const statusToClient = resp.status >= 500 ? 502 : resp.status;
       return res.status(statusToClient).json({ error: 'Explorer tx API error', status: resp.status, body: t.slice(0,1000) });
     }
-    const json = await resp.json();
+    const json = await parseResponseBody(resp);
     setCached(url, json);
     return res.json({ fetchedAt: Date.now(), cached: false, from: url, item: json });
   } catch (err) {
-    console.error('Error /api/tx/:txId', err && (err.stack || err));
-    return res.status(500).json({ error: 'خطا در گرفتن اطلاعات تراکنش', detail: String(err.message || err) });
+    console.error('Error /api/tx/:txId', err && (err.stack || err.message || err));
+    return res.status(500).json({ error: 'خطا در گرفتن اطلاعات تراکنش', detail: String(err && (err.message || err)) });
   }
 });
 
@@ -224,17 +287,62 @@ app.get('/api/summary/:address', async (req, res) => {
     if (!address) return res.status(400).json({ error: 'آدرس لازم است' });
 
     const url = `${TESTNET_BASE}/boxes/byAddress/${encodeURIComponent(address)}?limit=500`;
-    const data = getCached(url) || (await (await fetchWithTimeout(url)).json());
-    const items = (data && data.items) ? data.items : (Array.isArray(data) ? data : []);
 
+    // try cache first
+    let data = getCached(url);
+    if (!data) {
+      // fetch and validate response
+      let resp;
+      try {
+        resp = await fetchWithTimeout(url);
+      } catch (err) {
+        console.error('[proxy] summary fetch error for', url, err && (err.name || err.message || err));
+        // fallback to cached if present
+        if (data) {
+          // (we already checked, but keep pattern)
+          const items = data.items || (Array.isArray(data) ? data : []);
+          // aggregate from cached below
+        } else {
+          if (err && err.name === 'AbortError') return res.status(504).json({ error: 'Explorer request timed out' });
+          return res.status(502).json({ error: 'خطا در تماس با Explorer', detail: String(err && (err.message || err)) });
+        }
+      }
+
+      if (resp) {
+        if (!resp.ok) {
+          const t = await resp.text().catch(()=>'');
+          console.error('Explorer returned non-OK for summary:', resp.status, t.slice(0,500));
+          // fallback to cache if possible
+          data = getCached(url);
+          if (!data) {
+            const statusToClient = resp.status >= 500 ? 502 : resp.status;
+            return res.status(statusToClient).json({ error: 'Explorer error for summary', status: resp.status, body: t.slice(0,1000) });
+          }
+        } else {
+          // good response
+          const body = await parseResponseBody(resp);
+          const items = Array.isArray(body) ? body : (body && body.items ? body.items : []);
+          data = { items, raw: body };
+          setCached(url, data);
+        }
+      }
+    }
+
+    // at this point data should exist (either from fetch above or cache)
+    const items = (data && data.items) ? data.items : (Array.isArray(data) ? data : []);
     // aggregate
     let totalNanoErg = 0n;
     const tokenMap = new Map();
     items.forEach(it => {
-      totalNanoErg += BigInt(it.value || 0);
+      try {
+        totalNanoErg += BigInt(it.value || 0);
+      } catch (e) {
+        // ignore bad values
+      }
       (it.assets || []).forEach(a => {
         const id = String(a.tokenId);
-        const amt = BigInt(a.amount || 0);
+        let amt = 0n;
+        try { amt = BigInt(a.amount || 0); } catch(e) { amt = 0n; }
         tokenMap.set(id, (tokenMap.get(id) || 0n) + amt);
       });
     });
@@ -250,8 +358,8 @@ app.get('/api/summary/:address', async (req, res) => {
       utxoCount: items.length
     });
   } catch (err) {
-    console.error('Error /api/summary/:address', err && (err.stack || err));
-    return res.status(500).json({ error: 'خطا در ساخت خلاصه', detail: String(err.message || err) });
+    console.error('Error /api/summary/:address', err && (err.stack || err.message || err));
+    return res.status(500).json({ error: 'خطا در ساخت خلاصه', detail: String(err && (err.message || err)) });
   }
 });
 

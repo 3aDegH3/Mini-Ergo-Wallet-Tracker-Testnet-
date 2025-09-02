@@ -1,6 +1,5 @@
 // frontend/app.js
-// Mini Ergo Wallet Tracker — frontend logic
-// Assumes Chart.js is loaded and backend served on same origin (API_ROOT = '')
+// Mini Ergo Wallet Tracker — frontend logic (improved table rendering to avoid layout break)
 const API_ROOT = ''; // same origin
 
 // DOM refs
@@ -44,9 +43,17 @@ let chart = null;
 // helpers
 function humanERG(nano) {
   try {
-    return (Number(nano) / 1e9).toLocaleString('en-US');
+    // accept string or number or BigInt-like string
+    if (typeof nano === 'string' && /^[0-9]+$/.test(nano)) {
+      // use BigInt to avoid precision loss for very large numbers then convert to Number for display
+      const n = BigInt(nano);
+      return (Number(n) / 1e9).toLocaleString('en-US', { maximumFractionDigits: 9 });
+    }
+    const n = Number(nano || 0);
+    if (Number.isFinite(n)) return (n / 1e9).toLocaleString('en-US', { maximumFractionDigits: 9 });
+    return String(nano);
   } catch {
-    return nano;
+    return String(nano);
   }
 }
 
@@ -84,7 +91,6 @@ async function fetchUTXOs(address, limit = 500, offset = 0) {
   const capped = Math.min(limit || 500, 500);
   const url = `${API_ROOT}/api/wallet/${encodeURIComponent(address)}/utxos?limit=${capped}&offset=${offset}`;
   const j = await fetchJson(url);
-  // our backend returns { items: [...] } or similar
   return j.items || [];
 }
 
@@ -98,6 +104,44 @@ async function fetchSummary(address) {
   }
 }
 
+// Render helpers for tokens to avoid layout break
+function renderTokensPreviewElement(assets) {
+  const td = document.createElement('td');
+  td.className = 'p-2 text-xs break-all';
+  if (!assets || assets.length === 0) {
+    td.textContent = '-';
+    return td;
+  }
+
+  // We'll show up to N tokens inline (compact), and a "+X" suffix when more.
+  const maxInline = 6;
+  const inline = assets.slice(0, maxInline).map(a => {
+    const short = simpleId(String(a.tokenId || ''), 8);
+    const amt = String(a.amount ?? '');
+    return `${short}(${amt})`;
+  });
+
+  const previewDiv = document.createElement('div');
+  // prevent wrapping and force ellipsis if too long
+  previewDiv.style.maxWidth = '320px';
+  previewDiv.style.overflow = 'hidden';
+  previewDiv.style.whiteSpace = 'nowrap';
+  previewDiv.style.textOverflow = 'ellipsis';
+  previewDiv.title = assets.map(a => `${a.tokenId} (${a.amount})`).join('\n'); // full list in tooltip
+  previewDiv.textContent = inline.join(', ');
+
+  if (assets.length > maxInline) {
+    const moreSpan = document.createElement('span');
+    moreSpan.style.opacity = '0.75';
+    moreSpan.style.marginLeft = '6px';
+    moreSpan.textContent = `+${assets.length - maxInline} more`;
+    previewDiv.appendChild(moreSpan);
+  }
+
+  td.appendChild(previewDiv);
+  return td;
+}
+
 // render
 function renderTable(items) {
   tableBody.innerHTML = '';
@@ -106,15 +150,48 @@ function renderTable(items) {
 
     if (!lastSeenBoxIds.has(it.boxId)) tr.classList.add('highlight-new');
 
-    const tokens = (it.assets || []).map(a => `${simpleId(a.tokenId, 8)}(${a.amount})`).join(', ') || '-';
-    const vNano = it.value || 0;
-    tr.innerHTML = `
-      <td class="p-2 break-all">${simpleId(it.boxId, 40)}</td>
-      <td class="p-2">${vNano}</td>
-      <td class="p-2 text-xs break-all">${tokens}</td>
-      <td class="p-2">${it.creationHeight || '-'}</td>
-      <td class="p-2 text-xs break-all">${it.spentTransactionId ? simpleId(it.spentTransactionId, 20) : '-'}</td>
-    `;
+    // Box ID cell (truncated with title)
+    const tdBox = document.createElement('td');
+    tdBox.className = 'p-2 break-all';
+    tdBox.style.maxWidth = '300px';
+    tdBox.style.overflow = 'hidden';
+    tdBox.style.textOverflow = 'ellipsis';
+    tdBox.style.whiteSpace = 'nowrap';
+    tdBox.title = it.boxId || '';
+    tdBox.textContent = simpleId(it.boxId || '', 40);
+
+    // Value cell: show human-readable ERG, and keep nano as tooltip
+    const tdValue = document.createElement('td');
+    tdValue.className = 'p-2';
+    const vNano = it.value ?? 0;
+    tdValue.textContent = humanERG(vNano);
+    tdValue.title = `nanoERG: ${vNano}`;
+
+    // Tokens cell (compact preview)
+    const tdTokens = renderTokensPreviewElement(it.assets);
+
+    // Creation height
+    const tdHeight = document.createElement('td');
+    tdHeight.className = 'p-2';
+    tdHeight.textContent = it.creationHeight || '-';
+
+    // Spent tx
+    const tdSpent = document.createElement('td');
+    tdSpent.className = 'p-2 text-xs break-all';
+    tdSpent.style.maxWidth = '220px';
+    tdSpent.style.overflow = 'hidden';
+    tdSpent.style.textOverflow = 'ellipsis';
+    tdSpent.style.whiteSpace = 'nowrap';
+    tdSpent.title = it.spentTransactionId || '';
+    tdSpent.textContent = it.spentTransactionId ? simpleId(it.spentTransactionId, 20) : '-';
+
+    // assemble
+    tr.appendChild(tdBox);
+    tr.appendChild(tdValue);
+    tr.appendChild(tdTokens);
+    tr.appendChild(tdHeight);
+    tr.appendChild(tdSpent);
+
     tr.addEventListener('click', () => openModal(it));
     tableBody.appendChild(tr);
   });
@@ -140,14 +217,14 @@ function applyFiltersAndSort(items) {
   let filtered = items.filter(it => (Number(it.value || 0) >= minQ));
 
   if (tokenQ) {
-    filtered = filtered.filter(it => (it.assets || []).some(a => a.tokenId.includes(tokenQ)));
+    filtered = filtered.filter(it => (it.assets || []).some(a => String(a.tokenId).includes(tokenQ)));
   }
 
   const s = sortBy.value;
-  if (s === 'value_desc') filtered.sort((a,b)=> (b.value||0)-(a.value||0));
-  if (s === 'value_asc') filtered.sort((a,b)=> (a.value||0)-(b.value||0));
-  if (s === 'height_desc') filtered.sort((a,b)=> (b.creationHeight||0)-(a.creationHeight||0));
-  if (s === 'height_asc') filtered.sort((a,b)=> (a.creationHeight||0)-(b.creationHeight||0));
+  if (s === 'value_desc') filtered.sort((a,b)=> (Number(b.value||0) - Number(a.value||0)));
+  if (s === 'value_asc') filtered.sort((a,b)=> (Number(a.value||0) - Number(b.value||0)));
+  if (s === 'height_desc') filtered.sort((a,b)=> (Number(b.creationHeight||0) - Number(a.creationHeight||0)));
+  if (s === 'height_asc') filtered.sort((a,b)=> (Number(a.creationHeight||0) - Number(b.creationHeight||0)));
 
   return filtered;
 }
@@ -218,8 +295,9 @@ exportCsvBtn.addEventListener('click', ()=> {
     creationHeight: it.creationHeight || ''
   }));
   const header = Object.keys(rows[0]).join(',');
-  const csv = [header].concat(rows.map(r => Object.values(r).map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n'));
-  const blob = new Blob(csv, { type: 'text/csv;charset=utf-8;' });
+  const csvBody = rows.map(r => Object.values(r).map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const csv = header + '\n' + csvBody;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href = url; a.download = `${currentAddress || 'wallet'}_utxos.csv`; a.click();
   URL.revokeObjectURL(url);
@@ -241,8 +319,8 @@ function renderChart(tokens) {
     }
 
     const top = tokens.slice(0, 10);
-    const labels = top.map(t => t.tokenId.slice(0,8));
-    const data = top.map(t => Number(t.amount));
+    const labels = top.map(t => (t.tokenId || '').slice(0,8));
+    const data = top.map(t => Number(t.amount || 0));
 
     if (chart) chart.destroy();
     const ctx = tokensChartEl.getContext('2d');
