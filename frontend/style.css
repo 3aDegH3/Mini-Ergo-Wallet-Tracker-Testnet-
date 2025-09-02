@@ -1,0 +1,113 @@
+/* frontend/style.css */
+
+/* پایه و تنظیمات راست به چپ */
+body {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  background: #f8fafc;
+  color: #1e293b;
+  margin: 0;
+  padding: 0;
+  line-height: 1.5;
+}
+
+h1, h3, h4 {
+  margin: 0;
+}
+
+/* جدول UTXO */
+#utxo-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+#utxo-table th, #utxo-table td {
+  border-bottom: 1px solid #e2e8f0;
+  padding: 0.5rem;
+  text-align: left;
+  vertical-align: middle;
+  word-break: break-word;
+}
+
+#utxo-table tbody tr:hover {
+  background: rgba(99,102,241,0.06);
+  cursor: pointer;
+}
+
+.highlight-new {
+  background: linear-gradient(90deg, rgba(16,185,129,0.08), rgba(99,102,241,0.03));
+}
+
+/* فرم و ورودی‌ها */
+input, select, button {
+  font-family: inherit;
+  font-size: 0.875rem;
+}
+
+button {
+  cursor: pointer;
+}
+
+input, select {
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 0.5rem;
+  outline: none;
+}
+
+input:focus, select:focus {
+  border-color: #6366f1;
+  box-shadow: 0 0 0 1px rgba(99,102,241,0.3);
+}
+
+/* مدال */
+#modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: none;
+  justify-content: center;
+  align-items: center;
+  z-index: 999;
+}
+
+#modal.flex {
+  display: flex;
+}
+
+#modal-content {
+  background: #fff;
+  border-radius: 1rem;
+  padding: 1rem;
+  max-width: 600px;
+  width: 100%;
+  max-height: 80vh;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 0.75rem;
+}
+
+/* ریسپانسیو و گرید */
+@media (max-width: 768px) {
+  #controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+/* جدول break-word برای سلول‌های بزرگ */
+#utxo-table td {
+  word-break: break-word;
+}
+
+/* خلاصه و نمودار */
+#tokensChart {
+  max-height: 300px;
+}
+
+/* footer */
+footer {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-align: center;
+  margin-top: 2rem;
+}
