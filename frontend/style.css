@@ -1,192 +1,109 @@
 /* frontend/style.css */
-
-/* پایه و تنظیمات راست به چپ */
+/* پایه */
 body {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
   background: #f8fafc;
-  color: #1e293b;
+  color: #0f172a;
   margin: 0;
   padding: 0;
   line-height: 1.5;
   direction: rtl;
 }
-
-h1, h3, h4 {
-  margin: 0;
-}
-
-/* کانتینر و کارت (اگر از Tailwind استفاده می‌کنید این‌ها باز هم OK هستند) */
 .container { max-width: 1100px; margin: 24px auto; padding: 16px; }
-.card { background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 6px 18px rgba(2,6,23,0.06); }
+.card { background: #fff; border-radius: 12px; padding: 12px; box-shadow: 0 6px 18px rgba(2,6,23,0.06); }
 
-/* جدول UTXO: استفاده از table-layout: fixed برای جلوگیری از کشیدگی سلول‌ها */
-#utxo-table {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed; /* <-- مهم: محدود کردن رفتار جدول */
-}
-
-/* تعیین پهنای ستون‌ها (تناسبی و پایدار) */
-#utxo-table th:first-child,
-#utxo-table td:first-child { /* Box ID */
-  width: 36%;
-  max-width: 36%;
-}
-
-#utxo-table th:nth-child(2),
-#utxo-table td:nth-child(2) { /* Value */
-  width: 14%;
-  max-width: 14%;
-}
-
-#utxo-table th:nth-child(3),
-#utxo-table td:nth-child(3) { /* Tokens */
-  width: 30%;
-  max-width: 30%;
-}
-
-#utxo-table th:nth-child(4),
-#utxo-table td:nth-child(4) { /* Creation Height */
-  width: 10%;
-  max-width: 10%;
-}
-
-#utxo-table th:nth-child(5),
-#utxo-table td:nth-child(5) { /* Spent Tx */
-  width: 10%;
-  max-width: 10%;
-}
-
-/* سلول‌ها: ellipsis و کنترل overflow */
+/* جدول */
+#utxo-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 #utxo-table th, #utxo-table td {
-  border-bottom: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e6eef6;
   padding: 0.5rem;
   text-align: left;
   vertical-align: middle;
-  box-sizing: border-box;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap; /* جلوی شکست خطوط داخل سلول را می‌گیرد */
-}
-
-/* زمانی که می‌خواهیم محتوای کامل را ببینیم، از tooltip استفاده کنید (title از JS پر می‌شود) */
-#utxo-table tbody tr:hover {
-  background: rgba(99,102,241,0.06);
-  cursor: pointer;
-}
-
-/* سطر جدید (highlight) */
-.highlight-new {
-  background: linear-gradient(90deg, rgba(16,185,129,0.08), rgba(99,102,241,0.03));
-}
-
-/* کلاس مخصوص پیش‌نمایش توکن‌ها داخل سلول */
-.token-preview {
-  display: block;
-  max-width: 100%;
-  overflow: hidden;
   white-space: nowrap;
+}
+#utxo-table thead { background: #f1f5f9; }
+.highlight-new { background: linear-gradient(90deg, rgba(16,185,129,0.06), rgba(99,102,241,0.03)); }
+
+/* Tokens panel */
+#tokens-panel { margin-top: 8px; }
+#tokens-list { display: flex; flex-direction: column; gap: 8px; }
+
+/* token card */
+.token-card {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(15,23,42,0.04);
+  transition: box-shadow .15s ease, transform .08s ease;
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+}
+.token-card:hover { box-shadow: 0 6px 18px rgba(2,6,23,0.06); transform: translateY(-2px); cursor: pointer; }
+
+/* avatar / color square */
+.token-avatar {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 8px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.3px;
+}
+
+/* token info (flex) */
+.token-info { display:flex; flex-direction:column; min-width:0; flex:1; }
+.token-title {
+  font-weight: 600;
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
   text-overflow: ellipsis;
 }
+.token-sub { font-size: 12px; color: rgba(15,23,42,0.6); }
 
-/* زمانی که بخواهیم چند خط در سلول داشته باشیم (مثلاً در مدال) از اینجا استفاده شود */
-.break-multiline {
-  white-space: pre-wrap;
-  word-break: break-word;
+/* right column: amount and percent */
+.token-right { display:flex; flex-direction:column; align-items:flex-start; gap:6px; min-width:120px; text-align:left; }
+
+/* progress bar */
+.token-progress {
+  background: #eef2ff;
+  height: 8px;
+  border-radius: 999px;
+  overflow: hidden;
+  width: 160px;
+}
+.token-progress > .bar {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #7c3aed, #06b6d4);
+  border-radius: 999px;
+  transition: width .6s ease;
 }
 
-/* فرم و ورودی‌ها */
-input, select, button {
-  font-family: inherit;
-  font-size: 0.875rem;
+/* small controls under title */
+.token-controls { display:flex; gap:8px; align-items:center; font-size:12px; color: rgba(15,23,42,0.6); }
+
+/* search & sort input */
+#tokens-search { width: 100%; }
+#tokens-sort { min-width: 120px; }
+
+/* modal LTR for JSON readability */
+#modal-content { direction: ltr; text-align: left; white-space: pre-wrap; word-break: break-word; font-family: monospace; }
+
+/* small screens adjustments */
+@media (max-width: 640px) {
+  .token-right { min-width: 100px; align-items:flex-end; text-align:right; }
+  .token-progress { width: 120px; }
 }
 
-button {
-  cursor: pointer;
-}
-
-input, select {
-  border: 1px solid #cbd5e1;
-  border-radius: 0.5rem;
-  padding: 0.5rem;
-  outline: none;
-}
-
-input:focus, select:focus {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 1px rgba(99,102,241,0.3);
-}
-
-/* مدال */
-/* توجه: جاوااسکریپت شما کلاس 'hidden' و 'flex' را برای نمایش/مخفی‌سازی استفاده می‌کند */
+/* utility classes */
 .hidden { display: none !important; }
 .flex { display: flex !important; }
-
-#modal {
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.4);
-  display: none;
-  justify-content: center;
-  align-items: center;
-  z-index: 999;
-  padding: 1rem;
-}
-
-#modal .card {
-  max-width: 800px;
-}
-
-#modal-content {
-  background: #fff;
-  border-radius: 1rem;
-  padding: 1rem;
-  max-width: 600px;
-  width: 100%;
-  max-height: 80vh;
-  overflow-y: auto;
-  font-family: monospace;
-  font-size: 0.75rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-/* ریسپانسیو: برای صفحه‌های کوچک اجازه بدهیم ستون‌ها منعطف‌تر شوند */
-@media (max-width: 900px) {
-  #utxo-table th, #utxo-table td {
-    white-space: nowrap;
-    font-size: 0.85rem;
-    padding: 0.4rem;
-  }
-
-  /* کمتر کردن عرض ستون Box ID در موبایل تا جدول بهتر جا شود */
-  #utxo-table th:first-child,
-  #utxo-table td:first-child { width: 40%; max-width: 40%; }
-  #utxo-table th:nth-child(3),
-  #utxo-table td:nth-child(3) { width: 26%; max-width: 26%; }
-}
-
-/* ریسپانسیو کوچک‌تر: اگر واقعاً فضا کم شد، اجازه دهیم توکن‌ها به دو خط بروند (fallback) */
-@media (max-width: 520px) {
-  #utxo-table th, #utxo-table td { white-space: normal; }
-  .token-preview { white-space: normal; overflow: visible; text-overflow: clip; }
-}
-
-/* جدول break-word برای سلول‌هایی که لازم باشد */
-#utxo-table td {
-  word-break: break-word;
-}
-
-/* خلاصه و نمودار */
-#tokensChart {
-  max-height: 300px;
-  width: 100%;
-}
-
-/* footer */
-footer {
-  font-size: 0.75rem;
-  color: #94a3b8;
-  text-align: center;
-  margin-top: 2rem;
-}
